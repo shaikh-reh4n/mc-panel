@@ -54,8 +54,8 @@ function dash(){es?.close();clearInterval(poll);
  A.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{tab=b.dataset.t;dash()});$('#lo').onclick=async()=>{await api('POST','logout');loginView()};fixIcons();
  poll=setInterval(async()=>{try{S=await api('GET','state');paint()}catch{}},3000);({Overview:overview,Plugins:plugins,Files:files,Settings:settings})[tab]();paint()}
 function paint(){const s=$('#st');if(!s)return;s.className='pill '+S.status;s.textContent=S.status;
- const p=$('#pl2');if(p)p.innerHTML=S.players.length?S.players.map(n=>`<span class="chip">${esc(n)}</span>`).join(''):'<span class="mut">Nobody online</span>';
- const d=$('#ds');if(d)d.textContent=S.discord||'';const c=$('#cnt');if(c)c.textContent=`${S.players.length} / ${S.cfg.maxPlayers}`}
+ const p=$('#pl2');if(p)p.innerHTML=S.players.length?S.players.map(n=>`<span class="chip">${esc(n)}</span>`).join(''):S.online>0?`<span class="mut">${S.online} player${S.online>1?'s':''} online</span>`:'<span class="mut">Nobody online</span>';
+ const d=$('#ds');if(d)d.textContent=S.discord||'';const c=$('#cnt');if(c)c.textContent=`${Math.max(S.players.length,S.online||0)} / ${S.cfg.maxPlayers}`}
 
 function overview(){$('#v').innerHTML=`<div class="stats"><div class="stat"><span>Players</span><b id="cnt"></b></div><div class="stat"><span>Software</span><b>${kind()}</b></div><div class="stat"><span>Memory</span><b>${(S.cfg.ram/1024).toFixed(1)} GB</b></div></div>
  <div class="card pad"><div class="cap">Online now</div><div id="pl2"></div></div>

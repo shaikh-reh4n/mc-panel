@@ -35,10 +35,10 @@ const myTok=q=>(q.headers.cookie||'').match(/sid=([a-f0-9]{64})/)?.[1];
 const keepOnly=q=>{const t=myTok(q),e=sess.get(t);sess.clear();if(t)sess.set(t,e)};
 
 /* ---------- minecraft process ---------- */
-let ds='',proc=null,status='offline',logs=[],players=new Set(),clients=new Set(),idleSince=null,listener=null,socks=new Set(),restartNext=false,crashes=[],hook=null,installing='',installErr='';
+let ds='',pingOnline=0,pf=0,proc=null,status='offline',logs=[],players=new Set(),clients=new Set(),idleSince=null,listener=null,socks=new Set(),restartNext=false,crashes=[],hook=null,installing='',installErr='';
 const emit=l=>{logs.push(l);if(logs.length>500)logs.shift();for(const r of clients)r.write('data: '+JSON.stringify(l)+'\n\n');hook&&hook(l)};
 function line(l){emit(l);if(/\]: Done \(/.test(l)){status='online';idleSince=Date.now()}
- let m=l.match(/\]: (\w+) joined the game/);if(m)players.add(m[1]);m=l.match(/\]: (\w+) left the game/);if(m)players.delete(m[1])}
+ let m=l.match(/\]: ([.\w]{1,32}) joined the game/);if(m)players.add(m[1]);m=l.match(/\]: ([.\w]{1,32}) left the game/);if(m)players.delete(m[1])}
 function start(){if(proc||!cfg.created||!fs.existsSync(path.join(SRV,JAR())))return;closeListener();try{writeProps({motd:motdFull()})}catch{}status='starting';players.clear();
  proc=spawn('java',[`-Xms${Math.min(cfg.ram,1024)}M`,`-Xmx${cfg.ram}M`,'-XX:+UseG1GC','-XX:+UseStringDeduplication','-jar',JAR(),'nogui'],{cwd:SRV});
  const f=d=>d.toString().split(/\r?\n/).filter(Boolean).forEach(line);proc.stdout.on('data',f);proc.stderr.on('data',f);
@@ -50,12 +50,20 @@ function start(){if(proc||!cfg.created||!fs.existsSync(path.join(SRV,JAR())))ret
 function stop(){if(!proc||status==='stopping')return;status='stopping';proc.stdin.write('stop\n');const p=proc;setTimeout(()=>p.exitCode===null&&p.kill('SIGKILL'),60000).unref()}
 const restart=()=>{if(!proc)return start();restartNext=true;stop()};
 const cmd=c=>{if(proc&&status!=='offline')proc.stdin.write(String(c).replace(/[\r\n]+/g,' ')+'\n')};
-setInterval(()=>{if(cfg.autoShutdown&&status==='online'&&!players.size){idleSince??=Date.now();if(Date.now()-idleSince>cfg.idle*6e4){emit('[panel] idle timeout — stopping');stop()}}else idleSince=null},3e4).unref();
+// Idle check uses the server's own player count (Server List Ping), not just log parsing, so players are never missed.
+setInterval(async()=>{if(status!=='online'){pingOnline=0;pf=0;return}
+ const p=await ping(+readProps()['server-port']||25565);pf=p?0:pf+1;if(p)pingOnline=p.online;
+ const busy=players.size>0||(p?p.online>0:pf<20);
+ if(cfg.autoShutdown&&!busy){idleSince??=Date.now();if(Date.now()-idleSince>cfg.idle*6e4){emit('[panel] idle timeout — stopping');stop()}}else idleSince=null},3e4).unref();
 
 /* ---------- auto-start listener (fake MC server while offline) ---------- */
 const vi=n=>{const b=[];do{let t=n&127;n>>>=7;if(n)t|=128;b.push(t)}while(n);return Buffer.from(b)};
 const rv=(b,o)=>{let r=0,s=0,c;do{if(o>=b.length)return null;c=b[o++];r|=(c&127)<<s;s+=7}while(c&128);return[r,o]};
 const str=s=>{const b=Buffer.from(s);return Buffer.concat([vi(b.length),b])},pk=(id,d)=>{const p=Buffer.concat([vi(id),d]);return Buffer.concat([vi(p.length),p])};
+function ping(port){return new Promise(ok=>{const s=net.connect(port,'127.0.0.1');let buf=Buffer.alloc(0),done=0;const end=v=>{if(!done){done=1;s.destroy();ok(v)}};
+ s.setTimeout(4000,()=>end(null));s.on('error',()=>end(null));
+ s.on('connect',()=>{s.write(pk(0,Buffer.concat([vi(0),str('127.0.0.1'),Buffer.from([port>>8,port&255]),vi(1)])));s.write(pk(0,Buffer.alloc(0)))});
+ s.on('data',d=>{buf=Buffer.concat([buf,d]);const L=rv(buf,0);if(!L||buf.length<L[1]+L[0])return;const id=rv(buf,L[1]),sl=id&&rv(buf,id[1]);if(!sl||buf.length<sl[1]+sl[0])return;try{end(JSON.parse(buf.subarray(sl[1],sl[1]+sl[0]).toString()).players)}catch{end(null)}})})}
 function closeListener(){if(listener){listener.close();const o=[...socks];socks.clear();setTimeout(()=>o.forEach(s=>s.destroy()),2000).unref();listener=null}}
 function openListener(){closeListener();if(!cfg.autoStart||!cfg.created||proc)return;
  listener=net.createServer(s=>{socks.add(s);s.setTimeout(8000,()=>s.destroy());s.on('close',()=>socks.delete(s));s.on('error',()=>{});
@@ -118,7 +126,7 @@ const R={
   fails.delete(ip);aud(ip,'login ok');const t=crypto.randomBytes(32).toString('hex');sess.set(t,Date.now()+432e5);
   s.setHeader('Set-Cookie',`sid=${t}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200${q.headers['x-forwarded-proto']==='https'||q.socket.encrypted?'; Secure':''}`);json(s,200,{ok:1})},
  'POST /api/logout':async(q,s)=>{sess.delete((q.headers.cookie||'').match(/sid=(\w+)/)?.[1]);json(s,200,{ok:1})},
- 'GET /api/state':async(q,s)=>json(s,200,{status,players:[...players],cfg:pub(),installing,installErr,discord:ds,backups:fs.readdirSync(BK).filter(f=>f.endsWith('.tar.gz')).sort().reverse()}),
+ 'GET /api/state':async(q,s)=>json(s,200,{status,players:[...players],cfg:pub(),installing,installErr,discord:ds,online:pingOnline,backups:fs.readdirSync(BK).filter(f=>f.endsWith('.tar.gz')).sort().reverse()}),
  'GET /api/versions':async(q,s,u)=>{const t=u.searchParams.get('type')==='paper'?'paper':'fabric';vcache[t]??=t==='paper'?await paperVersions():(await j('https://meta.fabricmc.net/v2/versions/game')).filter(v=>v.stable).map(v=>v.version);json(s,200,vcache[t].slice(0,25))},
  'POST /api/create':async(q,s)=>{if(cfg.created||installing)throw Error('Server already exists');const b=await body(q,2e5);
   if(!/^[\w.-]+$/.test(b.version||''))throw Error('Pick a version');if(!b.eula)throw Error('Accept the Minecraft EULA');
@@ -177,7 +185,7 @@ const R={
   cfg.created=true;if(!fs.existsSync(path.join(SRV,'fabric-server.jar'))&&fs.existsSync(path.join(SRV,'server.jar')))cfg.type='paper';save();openListener();json(s,200,{ok:1})},
  'DELETE /api/backups':async(q,s,u)=>{fs.rmSync(bkName(u.searchParams.get('name')),{force:true});json(s,200,{ok:1})}
 };
-const api={cfg,save,dstat:s=>{ds=s},emit,start,stop,restart,cmd,status:()=>status,players:()=>[...players],setHook:f=>{hook=f}};
+const api={cfg,save,dstat:s=>{ds=s},emit,start,stop,restart,cmd,status:()=>status,players:()=>[...players],online:()=>pingOnline,setHook:f=>{hook=f}};
 const MIME={'.woff2':'font/woff2','.html':'text/html','.js':'text/javascript','.css':'text/css'};
 const H=async(q,s)=>{
  s.setHeader('X-Content-Type-Options','nosniff');s.setHeader('Cross-Origin-Resource-Policy','same-origin');if(q.socket.encrypted)s.setHeader('Strict-Transport-Security','max-age=31536000');s.setHeader('X-Frame-Options','DENY');s.setHeader('Referrer-Policy','no-referrer');

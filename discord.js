@@ -18,10 +18,10 @@ module.exports=async function(a){
  const me=client=new Client({intents:[G.Guilds,G.GuildMessages,G.MessageContent]});
  const ch=async id=>{if(!id)return null;try{return me.channels.cache.get(id)||await me.channels.fetch(id)}catch{return null}};
  const isOp=m=>!!d.opRole&&!!m?.roles?.cache?.has(d.opRole),xc=()=>me.channels.cache.get(d.crossChat);
- const view=()=>{const s=a.status(),p=a.players(),ic={online:'🟢',offline:'🔴'}[s]||'🟡';
+ const view=()=>{const s=a.status(),p=a.players(),n=Math.max(p.length,a.online()),ic={online:'🟢',offline:'🔴'}[s]||'🟡';
   return{embeds:[new E().setTitle(a.cfg.name||'Minecraft Server').setColor(s==='online'?0x34c759:s==='offline'?0xff3b30:0xffcc00)
    .setDescription(a.cfg.motd||null).addFields({name:'Status',value:`${ic} ${s[0].toUpperCase()+s.slice(1)}`,inline:true},
-   {name:'Players',value:`${p.length}/${a.cfg.maxPlayers}`+(p.length?'\n'+p.join(', '):''),inline:true},{name:'Version',value:`${a.cfg.type==='paper'?'Paper':'Fabric'} ${a.cfg.version}`,inline:true})
+   {name:'Players',value:`${n}/${a.cfg.maxPlayers}`+(p.length?'\n'+p.join(', '):''),inline:true},{name:'Version',value:`${a.cfg.type==='paper'?'Paper':'Fabric'} ${a.cfg.version}`,inline:true})
    .setFooter({text:'Live panel · updates automatically'})],
   components:[new Row().addComponents(new B().setCustomId('start').setLabel('Start').setStyle(S.Success),
    new B().setCustomId('stop').setLabel('Stop').setStyle(S.Danger),new B().setCustomId('restart').setLabel('Restart').setStyle(S.Secondary))]}};
@@ -31,10 +31,10 @@ module.exports=async function(a){
    if(!pm){const ms=await c.messages.fetch({limit:30}).catch(()=>null);pm=ms?.find(m=>m.author.id===me.user.id&&m.components.length)||null}
    if(!pm)pm=await c.send(view());d.panelMsg=c.id+':'+pm.id;a.save();return pm}
   catch(e){a.dstat('Panel error: '+(e.code===50013||e.code===50001?'bot needs View Channel, Send Messages & Embed Links in the panel channel':e.message));return null}}
- async function refresh(force){if(me!==client)return;const v=view(),k=JSON.stringify([a.status(),a.players(),a.cfg.name,a.cfg.motd,a.cfg.maxPlayers,a.cfg.version]);
+ async function refresh(force){if(me!==client)return;const v=view(),k=JSON.stringify([a.status(),a.players(),a.online(),a.cfg.name,a.cfg.motd,a.cfg.maxPlayers,a.cfg.version]);
   if(!force&&k===last)return;if(!pm&&!await ensure())return;
   try{await pm.edit(v);last=k}catch(e){if(e.code===10008){pm=null;last='';delete d.panelMsg}else a.dstat('Panel error: '+e.message)}}
- const pres=()=>{const s=a.status(),n=a.players().length,t=s==='online'?`${n} player${n===1?'':'s'} online`:s==='offline'?'Server offline':'Server '+s;
+ const pres=()=>{const s=a.status(),n=Math.max(a.players().length,a.online()),t=s==='online'?`${n} player${n===1?'':'s'} online`:s==='offline'?'Server offline':'Server '+s;
   if(t!==lastP){lastP=t;me.user.setPresence({status:s==='online'?'online':'idle',activities:[{name:t,type:3}]})}};
  me.once(Events.ClientReady,async()=>{note='Connected as '+me.user.tag;
   const c=await ch(d.crossChat);if(c?.fetchWebhooks){try{wh=(await c.fetchWebhooks()).find(w=>w.owner?.id===me.user.id)||await c.createWebhook({name:'Minecraft Chat'})}catch{note+=' · cross-chat: grant Manage Webhooks for player heads/names'}}
@@ -55,7 +55,7 @@ module.exports=async function(a){
  a.setHook(l=>{buf.push(l.replace(/```/g,"'''").slice(0,300));
   let m=l.match(/\]: (?:\[Not Secure\] )?<([\w.]{1,16})> (.+)$/);if(m)return chat(m[1],m[2]);
   if(d.events!==false){
-   if(m=l.match(/\]: (\w{1,16}) (joined|left) the game$/))return post({embeds:[emb(m[2]==='joined'?0x34c759:0xff3b30,m[1],`${m[1]} ${m[2]==='joined'?'joined the server':'left the server'}`)]});
+   if(m=l.match(/\]: ([.\w]{1,32}) (joined|left) the game/))return post({embeds:[emb(m[2]==='joined'?0x34c759:0xff3b30,m[1],`${m[1]} ${m[2]==='joined'?'joined the server':'left the server'}`)]});
    if(m=l.match(/\]: (\w{1,16}) (has (?:made the advancement|completed the challenge|reached the goal) .+)$/))return post({embeds:[emb(0xffcc00,m[1],`${m[1]} ${m[2]}`)]});
    if((m=l.match(/\]: (\w{1,16}) (.+)$/))&&a.players().includes(m[1])&&DEATH.test(m[2]))return post({embeds:[emb(0x8e8e93,m[1],`${m[1]} ${m[2]}`)]})}
   if(d.statusMsgs!==false){if(/\]: Done \(/.test(l))post({embeds:[new E().setColor(0x34c759).setTitle('✅ Server started')]});else if(/\]: Stopping server/.test(l))post({embeds:[new E().setColor(0xff3b30).setTitle('🛑 Server stopped')]})}});
